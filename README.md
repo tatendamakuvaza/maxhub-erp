@@ -18,7 +18,7 @@
 ![IFRS 18](https://img.shields.io/badge/IFRS%2018-early%20adopted-0E2C52)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-### 🌍 [Live demo → https://YOUR-APP.streamlit.app](https://YOUR-APP.streamlit.app)
+### 🌍 [Live demo → https://max-erp.streamlit.app](https://max-erp.streamlit.app)
 Log in as `tendai.moyo` (CEO) or any demo account on the log-in page. Password: `Maxhub@2026`.
 *(Free hosting: if the app is asleep, click "Yes, get this app back up!" and wait about a minute.)*
 
