@@ -1,6 +1,8 @@
-streamlit>=1.50
-pandas>=2.2
-plotly>=5.22
-SQLAlchemy>=2.0
-psycopg2-binary>=2.9.9
-python-dotenv>=1.0
+# Exact versions tested with this app (Sep 2026) - pinned so the online app
+# doesn't break when a new version of a package comes out.
+streamlit==1.64.0
+pandas==3.0.6
+plotly==7.1.0
+SQLAlchemy==2.1.1
+psycopg2-binary==2.9.13
+python-dotenv==1.2.3
