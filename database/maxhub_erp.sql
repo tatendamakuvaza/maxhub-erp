@@ -1,5 +1,5 @@
 -- =====================================================================================
--- GENERATED FILE - built by database/build.py on 24 Sep 2026 from database/modules/*.sql
+-- GENERATED FILE - built by database/build.py on 27 Sep 2026 from database/modules/*.sql
 -- Edit the module files, then run:  python database/build.py
 -- =====================================================================================
 
@@ -45,6 +45,14 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 DROP SCHEMA IF EXISTS erp CASCADE;
 CREATE SCHEMA erp;
 SET search_path TO erp, public;
+
+-- Make "erp" the default schema for anyone connecting to THIS database (e.g. hosted
+-- PostgreSQL such as Neon, pgAdmin, web SQL editors). Skipped quietly if not allowed.
+DO $$ BEGIN
+    EXECUTE format('ALTER DATABASE %I SET search_path = erp, public', current_database());
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'Could not set the default search_path (not the database owner) - that is OK.';
+END $$;
 
 /* ---------- Enumerated types ---------- */
 CREATE TYPE employment_type   AS ENUM ('full_time','part_time','contractor','intern');
@@ -596,6 +604,7 @@ CREATE TABLE app_users (
     mfa_enabled          BOOLEAN      NOT NULL DEFAULT FALSE,
     mfa_secret           TEXT,                           -- TOTP secret (encrypted) if MFA switched on
     is_service_account   BOOLEAN      NOT NULL DEFAULT FALSE,
+    demo_protected       BOOLEAN      NOT NULL DEFAULT FALSE,  -- shared public-demo login (see module 25)
     created_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CHECK (username = lower(username)),
@@ -669,7 +678,8 @@ CREATE TABLE security_policy (
     lockout_minutes        SMALLINT NOT NULL DEFAULT 15,
     session_hours          SMALLINT NOT NULL DEFAULT 8,
     password_max_age_days  SMALLINT NOT NULL DEFAULT 90,
-    bcrypt_cost            SMALLINT NOT NULL DEFAULT 10 CHECK (bcrypt_cost BETWEEN 6 AND 14)
+    bcrypt_cost            SMALLINT NOT NULL DEFAULT 10 CHECK (bcrypt_cost BETWEEN 6 AND 14),
+    demo_mode              BOOLEAN  NOT NULL DEFAULT FALSE   -- TRUE = public demo (see module 25)
 );
 
 CREATE TABLE audit_log (
@@ -3149,11 +3159,13 @@ DECLARE
     u   app_users%ROWTYPE;
     pol security_policy%ROWTYPE;
     v_ok BOOLEAN;
+    v_demo BOOLEAN;                     -- shared public-demo account: never locks
 BEGIN
     SELECT * INTO pol FROM security_policy WHERE policy_id = 1;
     SELECT * INTO u FROM app_users a
      WHERE lower(a.username) = lower(trim(p_login)) OR lower(a.email) = lower(trim(p_login))
      LIMIT 1;
+    v_demo := FOUND AND pol.demo_mode AND u.demo_protected;
 
     IF NOT FOUND THEN
         PERFORM crypt(COALESCE(p_password, ''), gen_salt('bf', pol.bcrypt_cost));   -- same delay as a real check
@@ -3188,9 +3200,18 @@ BEGIN
         VALUES (p_login, u.user_id, TRUE, p_ip, left(p_agent, 300));
         RETURN QUERY SELECT 'ok'::TEXT, u.user_id,
             CASE WHEN u.must_change_password THEN 'Please choose a new password.'
+                 WHEN v_demo THEN 'Welcome back!'
                  WHEN u.password_changed_at < now() - make_interval(days => pol.password_max_age_days)
                       THEN 'Your password is older than ' || pol.password_max_age_days || ' days - please change it.'
                  ELSE 'Welcome back!' END;
+        RETURN;
+    END IF;
+
+    IF v_demo THEN
+        INSERT INTO login_attempts (username_tried, user_id, success, failure_reason, ip_address, user_agent)
+        VALUES (p_login, u.user_id, FALSE, 'wrong_password', p_ip, left(p_agent, 300));
+        RETURN QUERY SELECT 'invalid'::TEXT, NULL::BIGINT,
+            'Incorrect username or password. (Demo password: see "Demo accounts" below.)'::TEXT;
         RETURN;
     END IF;
 
@@ -5100,6 +5121,109 @@ BEGIN
                        CASE r.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END, r.sig);
     END LOOP;
 END $$;
+
+-- >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  25_demo_mode.sql  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+/* =====================================================================================
+   25. PUBLIC DEMO MODE
+   -------------------------------------------------------------------------------------
+   When the ERP is put online as a PUBLIC DEMO, many strangers share the same demo
+   log-ins (tendai.moyo, blessing.marufu ...). Without protection, one visitor could
+   change a demo password, disable the CEO's login or remove the IT Manager's admin role
+   and lock everybody else out.
+
+   Demo mode (security_policy.demo_mode = TRUE) protects the accounts flagged
+   app_users.demo_protected:
+     * their password, username, e-mail and active status cannot be changed
+     * they never lock after wrong passwords (handled in fn_login)
+     * their manual roles cannot be removed
+     * HR cannot terminate / move / re-grade the employees behind them
+     * the security policy page is read-only
+   Everything else (timesheets, invoices, journals, payroll ...) still works, so visitors
+   can try the whole system. Reset the demo at any time by re-running maxhub_erp.sql.
+
+   GOING LIVE FOR REAL USE:  UPDATE erp.security_policy SET demo_mode = FALSE;
+   (and hide/remove the demo accounts - see docs/DEPLOY_ONLINE.md)
+   ===================================================================================== */
+
+CREATE OR REPLACE FUNCTION fn_demo_mode() RETURNS BOOLEAN
+LANGUAGE sql STABLE SET search_path = erp, public AS $$
+    SELECT COALESCE((SELECT demo_mode FROM security_policy WHERE policy_id = 1), FALSE);
+$$;
+
+-- app_users: shared demo logins keep their password & status
+CREATE OR REPLACE FUNCTION fn_demo_guard_app_users() RETURNS trigger
+LANGUAGE plpgsql SET search_path = erp, public AS $$
+BEGIN
+    IF NOT OLD.demo_protected OR NOT fn_demo_mode() THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.password_hash        IS DISTINCT FROM OLD.password_hash
+    OR NEW.username             IS DISTINCT FROM OLD.username
+    OR NEW.email                IS DISTINCT FROM OLD.email
+    OR NEW.is_active            IS DISTINCT FROM OLD.is_active
+    OR NEW.must_change_password IS DISTINCT FROM OLD.must_change_password
+    OR NEW.demo_protected       IS DISTINCT FROM OLD.demo_protected THEN
+        RAISE EXCEPTION 'Public demo: "%" is a shared demo account, so its password and status cannot be changed. '
+                        'Try this on one of the other 160 staff accounts instead.', OLD.username;
+    END IF;
+    NEW.failed_logins := 0;              -- demo accounts never lock
+    NEW.locked_until  := NULL;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_demo_guard_app_users BEFORE UPDATE ON app_users
+    FOR EACH ROW EXECUTE FUNCTION fn_demo_guard_app_users();
+
+CREATE OR REPLACE FUNCTION fn_demo_guard_app_users_delete() RETURNS trigger
+LANGUAGE plpgsql SET search_path = erp, public AS $$
+BEGIN
+    IF OLD.demo_protected AND fn_demo_mode() THEN
+        RAISE EXCEPTION 'Public demo: "%" is a shared demo account and cannot be deleted.', OLD.username;
+    END IF;
+    RETURN OLD;
+END $$;
+CREATE TRIGGER trg_demo_guard_app_users_delete BEFORE DELETE ON app_users
+    FOR EACH ROW EXECUTE FUNCTION fn_demo_guard_app_users_delete();
+
+-- user_roles: manual roles of demo accounts cannot be removed
+-- (automatic roles are deleted & re-inserted by fn_sync_user_roles, so they are allowed)
+CREATE OR REPLACE FUNCTION fn_demo_guard_user_roles() RETURNS trigger
+LANGUAGE plpgsql SET search_path = erp, public AS $$
+BEGIN
+    IF OLD.source = 'manual' AND fn_demo_mode()
+       AND EXISTS (SELECT 1 FROM app_users u WHERE u.user_id = OLD.user_id AND u.demo_protected) THEN
+        RAISE EXCEPTION 'Public demo: roles of the shared demo accounts cannot be removed.';
+    END IF;
+    RETURN OLD;
+END $$;
+CREATE TRIGGER trg_demo_guard_user_roles BEFORE DELETE ON user_roles
+    FOR EACH ROW EXECUTE FUNCTION fn_demo_guard_user_roles();
+
+-- employees: HR cannot terminate / move / re-grade the people behind the demo logins
+CREATE OR REPLACE FUNCTION fn_demo_guard_employees() RETURNS trigger
+LANGUAGE plpgsql SET search_path = erp, public AS $$
+BEGIN
+    IF (NEW.status, NEW.department_id, NEW.job_grade_id) IS DISTINCT FROM (OLD.status, OLD.department_id, OLD.job_grade_id)
+       AND fn_demo_mode()
+       AND EXISTS (SELECT 1 FROM app_users u WHERE u.employee_id = OLD.employee_id AND u.demo_protected) THEN
+        RAISE EXCEPTION 'Public demo: % % uses a shared demo login, so their status, department and grade are locked. '
+                        'Try this on another employee.', OLD.first_name, OLD.last_name;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_demo_guard_employees BEFORE UPDATE OF status, department_id, job_grade_id ON employees
+    FOR EACH ROW EXECUTE FUNCTION fn_demo_guard_employees();
+
+-- security policy: read-only while in demo mode (switching demo mode OFF is always allowed)
+CREATE OR REPLACE FUNCTION fn_demo_guard_security_policy() RETURNS trigger
+LANGUAGE plpgsql SET search_path = erp, public AS $$
+BEGIN
+    IF OLD.demo_mode AND NEW.demo_mode THEN
+        RAISE EXCEPTION 'Public demo: the security policy is read-only.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_demo_guard_security_policy BEFORE UPDATE ON security_policy
+    FOR EACH ROW EXECUTE FUNCTION fn_demo_guard_security_policy();
 
 -- >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  30_seed_reference.sql  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
@@ -7548,7 +7672,32 @@ UPDATE fiscal_years SET is_closed = TRUE WHERE name IN ('FY2024','FY2025');
 -- 36.7 Finish ------------------------------------------------------------------------------
 SELECT set_config('erp.current_user_id', '', false);
 SET erp.skip_audit = 'off';
-ANALYZE;
+-- refresh planner statistics for the ERP tables
+DO $$ DECLARE t RECORD; BEGIN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'erp' LOOP
+        EXECUTE format('ANALYZE erp.%I', t.tablename);
+    END LOOP;
+END $$;
+
+-- >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  37_seed_demo_mode.sql  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+/* =====================================================================================
+   37. SWITCH ON PUBLIC DEMO MODE (demo data only - not part of maxhub_erp_schema.sql)
+   -------------------------------------------------------------------------------------
+   The nine showcase log-ins listed on the log-in page are shared by everyone who tries
+   the online demo, so they are protected (see module 25).
+   For a private / real installation run:   UPDATE erp.security_policy SET demo_mode = FALSE;
+   ===================================================================================== */
+UPDATE app_users SET demo_protected = TRUE
+ WHERE username IN ('tendai.moyo', 'blessing.marufu', 'memory.nkomo', 'chipo.sibanda', 'tawanda.gumbo',
+                    'nyasha.mutasa', 'kudakwashe.banda', 'tapiwa.mlambo', 'munyaradzi.mandaza');
+
+DO $$ BEGIN
+    IF (SELECT COUNT(*) FROM app_users WHERE demo_protected) <> 9 THEN
+        RAISE EXCEPTION 'Expected 9 demo accounts to protect';
+    END IF;
+END $$;
+
+UPDATE security_policy SET demo_mode = TRUE WHERE policy_id = 1;
 
 -- >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  99_optional_grants_and_checks.sql  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 

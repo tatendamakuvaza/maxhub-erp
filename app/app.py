@@ -12,7 +12,7 @@ from pathlib import Path
 import streamlit as st
 
 import auth
-from db import check_connection, scalar
+from db import check_connection, is_hosted, scalar
 
 ASSETS = Path(__file__).parent / "assets"
 st.set_page_config(page_title="Maxhub ERP", page_icon=str(ASSETS / "favicon.png"), layout="wide")
@@ -22,7 +22,16 @@ ok, error = check_connection()
 if not ok:
     st.image(str(ASSETS / "maxhub_logo.png"), width=260)
     st.error(error)
-    st.markdown("""
+    if is_hosted():
+        st.markdown("""
+**How to fix this (online version)**
+1. The free database may be waking up from sleep - wait 30 seconds and **refresh** this page.
+2. Check the **DATABASE_URL** in the app's *Settings → Secrets* on share.streamlit.io.
+3. Make sure you loaded **`database/maxhub_erp.sql`** into the online database
+   (see *docs/DEPLOY_ONLINE.md*).
+""")
+    else:
+        st.markdown("""
 **How to fix this**
 1. Make sure PostgreSQL is running (Windows: *Services* → `postgresql-x64-17` → *Running*).
 2. Check the settings in your **`.env`** file (copy `.env.example` → `.env` and put your password in).
@@ -40,6 +49,15 @@ def login_page():
         a, b, c = st.columns([1, 1.4, 1])
         b.image(str(ASSETS / "maxhub_logo.png"), width="stretch")
         st.markdown("<h3 style='text-align:center;margin-top:0'>Sign in to Maxhub ERP</h3>", unsafe_allow_html=True)
+        try:
+            demo = bool(scalar("SELECT demo_mode FROM security_policy WHERE policy_id = 1"))
+        except Exception:      # older database without demo mode - reload database/maxhub_erp.sql
+            demo = False
+        if demo:
+            st.info("**Public demo** - Maxhub Pvt Ltd and all its people, clients and figures are fictional. "
+                    "Pick any account under *Demo accounts* below (password `Maxhub@2026`). "
+                    "Changes you make are visible to other visitors and are wiped when the demo is reset.",
+                    icon=":material/science:")
         notice = st.session_state.pop("login_notice", None)
         if notice:
             st.info(notice)
@@ -57,7 +75,9 @@ def login_page():
                 st.error(message)
         st.caption("🔒 Passwords are checked by the database using bcrypt. Accounts lock for 15 minutes after "
                    "5 wrong attempts. Forgot your password? E-mail itsupport@maxhub.co.zw.")
-        with st.expander("Demo accounts (portfolio version) - password for all: Maxhub@2026"):
+        if not demo:
+            return
+        with st.expander("Demo accounts - password for all: Maxhub@2026", expanded=True):
             st.markdown("""
 | Username | Who | What they can see |
 |---|---|---|

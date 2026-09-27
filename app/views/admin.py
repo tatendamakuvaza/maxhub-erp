@@ -110,6 +110,11 @@ with tabs[4]:
 # ------------------------------------------------------------------ policy
 with tabs[5]:
     pol = query("SELECT * FROM security_policy").iloc[0]
+    demo_mode = bool(pol.get("demo_mode", False))
+    if demo_mode:
+        st.info("**Public demo mode is ON** - the policy is read-only and the 9 shared demo log-ins cannot be "
+                "changed, disabled or locked. For a real installation the database owner runs  \n"
+                "`UPDATE erp.security_policy SET demo_mode = FALSE;`", icon=":material/science:")
     with st.form("policy"):
         x, y, z = st.columns(3)
         minlen = x.number_input("Minimum password length", 6, 32, int(pol.min_password_length))
@@ -119,7 +124,7 @@ with tabs[5]:
         hist = x.number_input("Password history (no re-use)", 0, 24, int(pol.password_history_count))
         sess = y.number_input("Session length (hours)", 1, 72, int(pol.session_hours))
         age = z.number_input("Password max age (days)", 30, 365, int(pol.password_max_age_days))
-        if st.form_submit_button("Save policy", type="primary", disabled=not can("user.manage")):
+        if st.form_submit_button("Save policy", type="primary", disabled=not can("user.manage") or demo_mode):
             run_action("""UPDATE security_policy SET min_password_length = :a, max_failed_logins = :b, lockout_minutes = :c,
                                  password_history_count = :d, session_hours = :e, password_max_age_days = :f""",
                        {"a": minlen, "b": maxf, "c": lock, "d": hist, "e": sess, "f": age}, success="Security policy saved.")

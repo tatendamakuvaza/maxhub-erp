@@ -76,11 +76,13 @@ DECLARE
     u   app_users%ROWTYPE;
     pol security_policy%ROWTYPE;
     v_ok BOOLEAN;
+    v_demo BOOLEAN;                     -- shared public-demo account: never locks
 BEGIN
     SELECT * INTO pol FROM security_policy WHERE policy_id = 1;
     SELECT * INTO u FROM app_users a
      WHERE lower(a.username) = lower(trim(p_login)) OR lower(a.email) = lower(trim(p_login))
      LIMIT 1;
+    v_demo := FOUND AND pol.demo_mode AND u.demo_protected;
 
     IF NOT FOUND THEN
         PERFORM crypt(COALESCE(p_password, ''), gen_salt('bf', pol.bcrypt_cost));   -- same delay as a real check
@@ -115,9 +117,18 @@ BEGIN
         VALUES (p_login, u.user_id, TRUE, p_ip, left(p_agent, 300));
         RETURN QUERY SELECT 'ok'::TEXT, u.user_id,
             CASE WHEN u.must_change_password THEN 'Please choose a new password.'
+                 WHEN v_demo THEN 'Welcome back!'
                  WHEN u.password_changed_at < now() - make_interval(days => pol.password_max_age_days)
                       THEN 'Your password is older than ' || pol.password_max_age_days || ' days - please change it.'
                  ELSE 'Welcome back!' END;
+        RETURN;
+    END IF;
+
+    IF v_demo THEN
+        INSERT INTO login_attempts (username_tried, user_id, success, failure_reason, ip_address, user_agent)
+        VALUES (p_login, u.user_id, FALSE, 'wrong_password', p_ip, left(p_agent, 300));
+        RETURN QUERY SELECT 'invalid'::TEXT, NULL::BIGINT,
+            'Incorrect username or password. (Demo password: see "Demo accounts" below.)'::TEXT;
         RETURN;
     END IF;
 

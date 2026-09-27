@@ -40,6 +40,14 @@ DROP SCHEMA IF EXISTS erp CASCADE;
 CREATE SCHEMA erp;
 SET search_path TO erp, public;
 
+-- Make "erp" the default schema for anyone connecting to THIS database (e.g. hosted
+-- PostgreSQL such as Neon, pgAdmin, web SQL editors). Skipped quietly if not allowed.
+DO $$ BEGIN
+    EXECUTE format('ALTER DATABASE %I SET search_path = erp, public', current_database());
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'Could not set the default search_path (not the database owner) - that is OK.';
+END $$;
+
 /* ---------- Enumerated types ---------- */
 CREATE TYPE employment_type   AS ENUM ('full_time','part_time','contractor','intern');
 CREATE TYPE employee_status   AS ENUM ('active','on_leave','suspended','terminated');

@@ -359,6 +359,12 @@ git push
 
 ## Part 8: Make it your own and next steps
 
+**Put it online (free):** follow **[DEPLOY_ONLINE.md](DEPLOY_ONLINE.md)** (Neon database + Streamlit Community Cloud).
+
+**Demo mode:** the demo database protects the 9 shared demo log-ins (their passwords can't be changed and they
+never lock). For your own private copy switch it off in the Query Tool:
+`UPDATE erp.security_policy SET demo_mode = FALSE;`
+
 **Real company details** (Query Tool):
 ```sql
 UPDATE erp.firm_settings SET registration_number = '…', zimra_tin = '…', vat_number = '…',

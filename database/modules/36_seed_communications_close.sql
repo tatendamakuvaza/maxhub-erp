@@ -162,4 +162,9 @@ UPDATE fiscal_years SET is_closed = TRUE WHERE name IN ('FY2024','FY2025');
 -- 36.7 Finish ------------------------------------------------------------------------------
 SELECT set_config('erp.current_user_id', '', false);
 SET erp.skip_audit = 'off';
-ANALYZE;
+-- refresh planner statistics for the ERP tables
+DO $$ DECLARE t RECORD; BEGIN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'erp' LOOP
+        EXECUTE format('ANALYZE erp.%I', t.tablename);
+    END LOOP;
+END $$;

@@ -53,6 +53,7 @@ CREATE TABLE app_users (
     mfa_enabled          BOOLEAN      NOT NULL DEFAULT FALSE,
     mfa_secret           TEXT,                           -- TOTP secret (encrypted) if MFA switched on
     is_service_account   BOOLEAN      NOT NULL DEFAULT FALSE,
+    demo_protected       BOOLEAN      NOT NULL DEFAULT FALSE,  -- shared public-demo login (see module 25)
     created_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CHECK (username = lower(username)),
@@ -126,7 +127,8 @@ CREATE TABLE security_policy (
     lockout_minutes        SMALLINT NOT NULL DEFAULT 15,
     session_hours          SMALLINT NOT NULL DEFAULT 8,
     password_max_age_days  SMALLINT NOT NULL DEFAULT 90,
-    bcrypt_cost            SMALLINT NOT NULL DEFAULT 10 CHECK (bcrypt_cost BETWEEN 6 AND 14)
+    bcrypt_cost            SMALLINT NOT NULL DEFAULT 10 CHECK (bcrypt_cost BETWEEN 6 AND 14),
+    demo_mode              BOOLEAN  NOT NULL DEFAULT FALSE   -- TRUE = public demo (see module 25)
 );
 
 CREATE TABLE audit_log (

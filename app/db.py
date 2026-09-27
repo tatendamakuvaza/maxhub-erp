@@ -2,7 +2,13 @@
 db.py - database connection and helper functions for the Maxhub ERP dashboard.
 
 All pages import from here, so connection settings live in ONE place.
-Settings are read from the .env file in the project root (see .env.example).
+
+Where the connection settings come from (first one found wins):
+  1. DATABASE_URL  - one connection string, e.g. from Neon:
+         postgresql://user:password@ep-xxx.aws.neon.tech/neondb?sslmode=require
+     (Streamlit Community Cloud: put it in the app's "Secrets" box.)
+  2. DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD (+ optional DB_SSLMODE)
+     - on your own PC these come from the .env file (see .env.example).
 """
 import os
 from pathlib import Path
@@ -11,30 +17,63 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 # Load the .env file that sits in the project root (one level above /app)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
+def _setting(name: str, default: str | None = None) -> str | None:
+    """Read a setting from the environment / .env file, or from Streamlit secrets (hosting)."""
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:          # no secrets.toml on this computer - that's fine
+        pass
+    return default
+
+
+def _connection_url() -> URL:
+    database_url = _setting("DATABASE_URL")
+    if database_url:
+        url = make_url(database_url.strip().strip('"').strip("'"))
+        url = url.set(drivername="postgresql+psycopg2")
+        # Neon: the "-pooler" address does not accept our search_path setting, so use the
+        # direct address instead (same database, same password).
+        if url.host and "-pooler." in url.host:
+            url = url.set(host=url.host.replace("-pooler.", "."))
+        return url
+    query = {"sslmode": _setting("DB_SSLMODE")} if _setting("DB_SSLMODE") else {}
+    return URL.create(
+        drivername="postgresql+psycopg2",
+        username=_setting("DB_USER", "postgres"),
+        password=_setting("DB_PASSWORD", ""),
+        host=_setting("DB_HOST", "localhost"),
+        port=int(_setting("DB_PORT", "5432")),
+        database=_setting("DB_NAME", "maxhub_erp"),
+        query=query,
+    )
+
+
 @st.cache_resource(show_spinner=False)
 def get_engine():
     """Create ONE shared connection pool for the whole app."""
-    url = URL.create(
-        drivername="postgresql+psycopg2",
-        username=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", ""),
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", "5432")),
-        database=os.getenv("DB_NAME", "maxhub_erp"),
-    )
     return create_engine(
-        url,
-        pool_pre_ping=True,
+        _connection_url(),
+        pool_pre_ping=True,          # hosted databases sleep when idle - reconnect automatically
+        pool_recycle=240,            # ...and close connections before the host drops them
         # every connection automatically looks inside the "erp" schema
-        connect_args={"options": "-csearch_path=erp,public"},
+        connect_args={"options": "-csearch_path=erp,public", "connect_timeout": 20},
     )
+
+
+def is_hosted() -> bool:
+    """True when running online (a DATABASE_URL is configured) rather than on your own PC."""
+    return bool(_setting("DATABASE_URL"))
 
 
 def check_connection():

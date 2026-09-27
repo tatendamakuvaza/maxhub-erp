@@ -18,6 +18,10 @@
 ![IFRS 18](https://img.shields.io/badge/IFRS%2018-early%20adopted-0E2C52)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+### 🌍 [Live demo → https://YOUR-APP.streamlit.app](https://YOUR-APP.streamlit.app)
+Log in as `tendai.moyo` (CEO) or any demo account on the log-in page. Password: `Maxhub@2026`.
+*(Free hosting: if the app is asleep, click "Yes, get this app back up!" and wait about a minute.)*
+
 ![Financial statements](docs/screenshots/financial_statements.png)
 
 ---
@@ -98,7 +102,8 @@ More: `projects.png`, `timesheets.png`, `crm.png`, `billing.png`, `finance.png`,
 
 ## 🚀 Quick start (Windows)
 
-Full beginner instructions: **[docs/STEP_BY_STEP_GUIDE.md](docs/STEP_BY_STEP_GUIDE.md)**.
+Full beginner instructions: **[docs/STEP_BY_STEP_GUIDE.md](docs/STEP_BY_STEP_GUIDE.md)**.  
+Put it online for free (Neon + Streamlit Community Cloud): **[docs/DEPLOY_ONLINE.md](docs/DEPLOY_ONLINE.md)**.
 
 ```bat
 :: 1. Database (PostgreSQL 15+). Change 17 to your version.
@@ -142,8 +147,8 @@ maxhub-erp/
 ├── database/
 │   ├── maxhub_erp.sql    # ⭐ the single file to run (generated)
 │   ├── build.py          # rebuilds maxhub_erp.sql from the modules (--schema = no demo data)
-│   └── modules/          # 00-24 schema & logic · 30-36 demo data · 99 checks
-├── docs/                 # STEP_BY_STEP_GUIDE.md, screenshots/
+│   └── modules/          # 00-25 schema, logic & demo mode · 30-37 demo data · 99 checks
+├── docs/                 # STEP_BY_STEP_GUIDE.md, DEPLOY_ONLINE.md, screenshots/
 ├── scripts/              # setup_database.bat, run_dashboard.bat
 ├── tests/                # test_all_pages.py (logs in as 9 users, renders every page) · integrity_checks.sql
 ├── .streamlit/config.toml  requirements.txt  .env.example  LICENSE
@@ -164,7 +169,7 @@ More checks are in `database/modules/99_optional_grants_and_checks.sql`.
 - [ ] Two-factor log-in (TOTP; columns already exist)
 - [ ] PDF payslips & invoices
 - [ ] Branch ledgers in local functional currency with IAS 21 translation reserve
-- [ ] Hosted demo (Neon/Supabase + Streamlit Community Cloud)
+- [x] Hosted public demo (Neon PostgreSQL + Streamlit Community Cloud) with database-enforced **demo mode**
 
 ## ⚠️ Disclaimer
 
@@ -178,4 +183,4 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 **Built for Maxhub Pvt Ltd** · Harare, Zimbabwe
-<!-- Tatenda Makuvaza, tatendamakuvaza3@gmail.com In Tatenda Makuvaza, Whatsapp +263782514255 -->
+<!-- Add your name, LinkedIn and email here, e.g.  Built by Jane Doe · linkedin.com/in/janedoe -->
